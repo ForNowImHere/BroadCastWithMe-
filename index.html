@@ -5,116 +5,88 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Screen Share Control</title>
 <style>
-  body { background: #111; color: #eee; font-family: monospace; }
-  #login { margin-bottom: 1rem; }
-  label, input { display: block; margin: 0.3rem 0; }
-  #log { height: 4rem; overflow-y: auto; background: #222; padding: 0.5rem; margin-bottom: 1rem; }
-  canvas { border: 1px solid #444; background: black; cursor: crosshair; }
+  body { background:#121212; color:#eee; font-family: monospace; }
+  #screen { border: 2px solid #555; margin-top: 10px; width: 640px; height: 360px; image-rendering: pixelated; }
+  input, button { margin: 5px; }
 </style>
 </head>
 <body>
-
-<h2>Screen Share Control</h2>
-
-<div id="login">
-  <label>Username:<input id="username" value="keenbean" /></label>
-  <label>Password:<input id="password" type="password" value="supersecret" /></label>
-  <label>Access Code:<input id="code" placeholder="Waiting for code..." readonly /></label>
-  <button id="connectBtn">Connect</button>
+<h1>Screen Share & Control</h1>
+<div>
+  <label>Username: <input type="text" id="username" value="keenbean" /></label><br/>
+  <label>Password: <input type="password" id="password" value="supersecret" /></label><br/>
+  <label>Access Code: <input type="text" id="code" /></label>
+  <button id="connect">Connect</button>
 </div>
-
-<div id="log"></div>
-
-<canvas id="screen" width="800" height="450"></canvas>
-
+<div>
+  <p id="status">Not connected.</p>
+  <p id="code_display"></p>
+</div>
+<img id="screen" alt="Shared screen will appear here" />
 <script>
   let ws;
-  const logDiv = document.getElementById("log");
-  const canvas = document.getElementById("screen");
-  const ctx = canvas.getContext("2d");
-  const usernameInput = document.getElementById("username");
-  const passwordInput = document.getElementById("password");
+  const statusEl = document.getElementById("status");
   const codeInput = document.getElementById("code");
-  const connectBtn = document.getElementById("connectBtn");
+  const codeDisplay = document.getElementById("code_display");
+  const screenImg = document.getElementById("screen");
 
-  function log(msg) {
-    logDiv.textContent += msg + "\n";
-    logDiv.scrollTop = logDiv.scrollHeight;
-  }
+  document.getElementById("connect").onclick = () => {
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    const code = codeInput.value.trim();
 
-  function connect() {
-    if (ws) ws.close();
+    // Replace with your ngrok URL from python output, no trailing slash
+    const ngrokUrl = "wss://1a331075b945.ngrok-free.app:8765";
 
-    // Replace this with your actual ngrok URL + port (use wss:// for secure)
-    // Example: 'wss://8205375fe07a.ngrok-free.app'
-    const ngrokUrl = "wss://8205375fe07a.ngrok-free.app"; 
-
+    statusEl.textContent = "Connecting...";
     ws = new WebSocket(ngrokUrl);
 
     ws.onopen = () => {
-      log("WebSocket connected.");
+      statusEl.textContent = "Connected. Awaiting auth...";
     };
 
     ws.onmessage = (event) => {
-      let msg = JSON.parse(event.data);
-
-      if (msg.type === "auth_code_generated") {
-        codeInput.value = msg.code;
-        log("New access code received: " + msg.code);
-      } 
-      else if (msg.type === "request_auth") {
-        // Send auth details
-        ws.send(JSON.stringify({
-          username: usernameInput.value,
-          password: passwordInput.value,
-          code: codeInput.value
-        }));
-        log("Sent auth data.");
-      }
-      else if (msg.type === "auth_result") {
-        if (msg.success) {
-          log("Authentication successful! Welcome!");
+      const data = JSON.parse(event.data);
+      if(data.type === "auth_code_generated") {
+        codeDisplay.textContent = "Your access code: " + data.code;
+        codeInput.value = data.code; // autofill to test
+      } else if(data.type === "request_auth") {
+        ws.send(JSON.stringify({username, password, code}));
+      } else if(data.type === "auth_result") {
+        if(data.success) {
+          statusEl.textContent = "Authenticated! Streaming screen...";
         } else {
-          log("Auth failed: " + msg.message);
+          statusEl.textContent = "Auth failed: " + data.message;
         }
-      }
-      else if (msg.type === "screenshot") {
-        const img = new Image();
-        img.src = "data:image/jpeg;base64," + msg.data;
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        };
-      }
-      else if(msg.type === "control_timeout") {
-        log("Control expired.");
+      } else if(data.type === "screenshot") {
+        screenImg.src = "data:image/jpeg;base64," + data.data;
+      } else if(data.type === "control_timeout") {
+        statusEl.textContent = data.message;
       }
     };
 
     ws.onerror = (e) => {
-      log("WebSocket error: " + e.message);
+      statusEl.textContent = "WebSocket error.";
     };
 
-    ws.onclose = () => {
-      log("WebSocket closed.");
+    ws.onclose = (e) => {
+      statusEl.textContent = "Disconnected.";
     };
-  }
+  };
 
-  connectBtn.onclick = connect;
-
-  // Send mouse move and click commands
-  canvas.addEventListener("mousemove", (e) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) * (1920 / canvas.width)); // Assuming 1920x1080 screen - adjust as needed
-    const y = Math.floor((e.clientY - rect.top) * (1080 / canvas.height));
-    ws.send(JSON.stringify({ type: "mouse_move", x, y }));
+  // Send mouse move and click events for control
+  screenImg.addEventListener("mousemove", e => {
+    if(!ws || ws.readyState !== WebSocket.OPEN) return;
+    const rect = screenImg.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) * window.devicePixelRatio);
+    const y = Math.floor((e.clientY - rect.top) * window.devicePixelRatio);
+    ws.send(JSON.stringify({type:"mouse_move", x, y}));
   });
 
-  canvas.addEventListener("click", (e) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "click" }));
+  screenImg.addEventListener("click", e => {
+    if(!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({type:"click"}));
   });
 </script>
-
 </body>
 </html>
