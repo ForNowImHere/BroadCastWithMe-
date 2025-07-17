@@ -1,130 +1,133 @@
-import asyncio
-import websockets
-import json
-import time
-import http.server
-import socketserver
-import threading
-import random
-import string
-import pyautogui
-from PIL import ImageGrab
-import io
-import base64
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Screen Share Control</title>
+<style>
+  body { font-family: Arial, sans-serif; background:#222; color:#eee; margin:0; padding:20px; }
+  #login { margin-bottom: 15px; }
+  label { display:block; margin: 8px 0 4px; }
+  input { padding: 6px; width: 200px; }
+  button { margin-top: 10px; padding: 8px 12px; }
+  #messages { margin-top: 10px; height: 100px; overflow-y: auto; background:#333; padding: 8px; border-radius: 5px; }
+  #screen { display:block; margin-top: 15px; max-width: 100%; border: 2px solid #555; cursor: crosshair; }
+</style>
+</head>
+<body>
 
-USERS = {
-    "keenbean": {"password": "supersecret", "lockout_until": 0, "access_code": ""},
-}
+<h1>Screen Share Control</h1>
 
-LOCKOUT_SECONDS = 60  # 1 minute lockout after bad access code
-clients = set()
-screen_control_granted = False
+<div id="login">
+  <label>Username:</label>
+  <input id="username" type="text" placeholder="Username" />
+  <label>Password:</label>
+  <input id="password" type="password" placeholder="Password" />
+  <label>Access Code:</label>
+  <input id="code" type="text" placeholder="Enter code" />
+  <button id="connectBtn">Connect</button>
+</div>
 
+<div id="messages"></div>
 
-def generate_code(length=6):
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+<img id="screen" alt="Shared screen will appear here" />
 
+<script>
+  const wsUrl = "ws://localhost:8765"; // Change to your server URL if needed
+  let ws;
+  let controlAllowed = false;
+  const messages = document.getElementById("messages");
+  const screenImg = document.getElementById("screen");
+  const connectBtn = document.getElementById("connectBtn");
 
-async def authenticate(websocket):
-    user = None
-    for username, info in USERS.items():
-        new_code = generate_code()
-        USERS[username]["access_code"] = new_code
-        await websocket.send(json.dumps({"type": "auth_code_generated", "code": new_code}))
+  function logMessage(msg) {
+    messages.innerHTML += msg + "<br>";
+    messages.scrollTop = messages.scrollHeight;
+  }
 
-    await websocket.send(json.dumps({"type": "request_auth"}))
-    try:
-        auth_data = await asyncio.wait_for(websocket.recv(), timeout=30)
-        data = json.loads(auth_data)
+  function sendJSON(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
 
-        username = data.get("username")
-        password = data.get("password")
-        code = data.get("code")
+  connectBtn.onclick = () => {
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value.trim();
+    const code = document.getElementById("code").value.trim();
+    if (!username || !password || !code) {
+      alert("Please fill in all fields.");
+      return;
+    }
 
-        user = USERS.get(username)
-        now = time.time()
-        if not user:
-            await websocket.send(json.dumps({"type": "auth_result", "success": False, "message": "Invalid user"}))
-            return False
-        if now < user.get("lockout_until", 0):
-            await websocket.send(json.dumps({"type": "auth_result", "success": False, "message": "Locked out. Try later."}))
-            return False
-        if user["password"] != password:
-            await websocket.send(json.dumps({"type": "auth_result", "success": False, "message": "Wrong password"}))
-            return False
-        if code != user["access_code"]:
-            user["lockout_until"] = now + LOCKOUT_SECONDS
-            await websocket.send(json.dumps({"type": "auth_result", "success": False, "message": "Wrong code! Locked out 1m"}))
-            return False
+    ws = new WebSocket(wsUrl);
 
-        await websocket.send(json.dumps({"type": "auth_result", "success": True, "message": "Welcome!"}))
-        return True
-    except asyncio.TimeoutError:
-        await websocket.send(json.dumps({"type": "auth_result", "success": False, "message": "Auth timeout"}))
-        return False
+    ws.onopen = () => {
+      logMessage("WebSocket connected, requesting auth...");
+      sendJSON({ username, password, code });
+    };
 
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
 
-async def send_screenshot(websocket):
-    while True:
-        img = ImageGrab.grab()
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG")
-        img_bytes = base64.b64encode(buffer.getvalue()).decode()
-        await websocket.send(json.dumps({"type": "screenshot", "data": img_bytes}))
-        await asyncio.sleep(1)
+        if (data.type === "request_auth") {
+          logMessage("Server requests authentication...");
+          // Send auth info
+          sendJSON({ username, password, code });
 
+        } else if (data.type === "auth_code_generated") {
+          logMessage("Access code generated: " + data.code);
 
-async def handle_input(websocket):
-    global screen_control_granted
-    screen_control_granted = True
-    timeout = time.time() + 60
+        } else if (data.type === "auth_result") {
+          if (data.success) {
+            logMessage("Auth success: " + data.message);
+            controlAllowed = data.control_allowed || false;
+          } else {
+            logMessage("Auth failed: " + data.message);
+            controlAllowed = false;
+          }
 
-    while time.time() < timeout:
-        try:
-            msg = await asyncio.wait_for(websocket.recv(), timeout=5)
-            data = json.loads(msg)
+        } else if (data.type === "screenshot") {
+          screenImg.src = "data:image/jpeg;base64," + data.data;
 
-            if data["type"] == "mouse_move":
-                x, y = data["x"], data["y"]
-                pyautogui.moveTo(x, y)
-            elif data["type"] == "click":
-                pyautogui.click()
-        except asyncio.TimeoutError:
-            pass
+        } else if (data.type === "control_denied") {
+          logMessage("Control denied: " + data.reason);
 
-    screen_control_granted = False
-    await websocket.send(json.dumps({"type": "control_timeout", "message": "Control expired"}))
+        } else if (data.type === "control_timeout") {
+          logMessage("Control timeout: " + data.message);
+          controlAllowed = false;
+        }
 
+      } catch (e) {
+        // Not JSON, maybe raw image data? Ignore.
+      }
+    };
 
-async def server_handler(websocket):
-    if not await authenticate(websocket):
-        await websocket.close()
-        return
+    ws.onclose = () => {
+      logMessage("WebSocket connection closed.");
+      controlAllowed = false;
+    };
 
-    clients.add(websocket)
-    try:
-        await asyncio.gather(
-            send_screenshot(websocket),
-            handle_input(websocket)
-        )
-    finally:
-        clients.remove(websocket)
+    ws.onerror = (e) => {
+      logMessage("WebSocket error: " + e.message);
+    };
+  };
 
+  // Send mouse control commands if allowed
+  screenImg.addEventListener("mousemove", (e) => {
+    if (!controlAllowed) return;
+    const rect = screenImg.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * window.screen.width;
+    const y = ((e.clientY - rect.top) / rect.height) * window.screen.height;
+    sendJSON({ type: "mouse_move", x: Math.floor(x), y: Math.floor(y) });
+  });
 
-async def run_websocket():
-    print("🔌 WebSocket server running at ws://0.0.0.0:8765")
-    async with websockets.serve(server_handler, "0.0.0.0", 8765):
-        await asyncio.Future()  # run forever
+  screenImg.addEventListener("click", () => {
+    if (!controlAllowed) return;
+    sendJSON({ type: "click" });
+  });
+</script>
 
-
-def run_http():
-    PORT = 8000
-    Handler = http.server.SimpleHTTPRequestHandler
-    httpd = socketserver.TCPServer(("", PORT), Handler)
-    print(f"🌐 Serving HTTP on http://localhost:{PORT}")
-    httpd.serve_forever()
-
-
-if __name__ == "__main__":
-    threading.Thread(target=run_http, daemon=True).start()
-    asyncio.run(run_websocket())
+</body>
+</html>
