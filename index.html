@@ -1,70 +1,52 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Glitchly Connect</title>
+  <title>Remote Viewer</title>
   <style>
-    body {
-      background-color: #111;
-      color: #0f0;
-      font-family: monospace;
-      text-align: center;
-      padding: 30px;
-    }
-    input, button {
-      margin: 10px;
-      padding: 10px;
-      font-size: 16px;
-    }
-    canvas {
-      border: 2px solid #0f0;
-      margin-top: 20px;
-    }
+    body { background: #111; color: white; font-family: sans-serif; text-align: center; }
+    canvas { border: 2px solid white; margin-top: 20px; cursor: crosshair; }
+    input { margin: 5px; padding: 5px; font-size: 16px; }
   </style>
 </head>
 <body>
-  <h1>🔒 Glitchly Remote Access</h1>
-  <div id="login">
-    <input id="user" placeholder="Username" /><br>
-    <input id="pass" type="password" placeholder="Password" /><br>
-    <input id="code" placeholder="Access Code" /><br>
+  <h1>Remote Screen</h1>
+  <div id="auth">
+    <input id="user" placeholder="Username"><br>
+    <input id="pass" placeholder="Password" type="password"><br>
+    <input id="code" placeholder="Access Code"><br>
     <button onclick="connect()">Connect</button>
+    <p id="status"></p>
   </div>
-  <canvas id="screen" width="800" height="450"></canvas>
-
+  <canvas id="screen" width="1280" height="720"></canvas>
   <script>
     let ws;
     let canvas = document.getElementById('screen');
     let ctx = canvas.getContext('2d');
 
     function connect() {
-      const username = document.getElementById('user').value;
-      const password = document.getElementById('pass').value;
-      const code = document.getElementById('code').value;
-
-      ws = new WebSocket('wss://your-ngrok-subdomain.ngrok-free.app/ws');
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'auth', username, password, code }));
-      };
-
-      ws.onmessage = (msg) => {
-        let data = JSON.parse(msg.data);
-        if (data.type === 'frame') {
+      ws = new WebSocket("ws://" + location.hostname + ":8765");
+      ws.onopen = () => console.log("Connected to server");
+      ws.onmessage = (e) => {
+        let msg = JSON.parse(e.data);
+        if (msg.type === "request_auth") {
+          let user = document.getElementById("user").value;
+          let pass = document.getElementById("pass").value;
+          let code = document.getElementById("code").value;
+          ws.send(JSON.stringify({type: "auth", username: user, password: pass, code: code}));
+        } else if (msg.type === "auth_result") {
+          document.getElementById("status").innerText = msg.message;
+          if (!msg.success) ws.close();
+        } else if (msg.type === "screen") {
           let img = new Image();
-          img.src = 'data:image/jpeg;base64,' + data.data;
           img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        } else if (data.type === 'auth' && data.ok === true) {
-          document.getElementById('login').style.display = 'none';
-        } else if (data.type === 'auth') {
-          alert('Auth failed or locked out.');
+          img.src = "data:image/jpeg;base64," + msg.data;
         }
       };
-
       canvas.onclick = (e) => {
-        const x = e.offsetX / canvas.width;
-        const y = e.offsetY / canvas.height;
-        ws.send(JSON.stringify({ type: 'click', x, y }));
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((e.clientX - rect.left) * (1920 / canvas.width));
+        const y = Math.floor((e.clientY - rect.top) * (1080 / canvas.height));
+        ws.send(JSON.stringify({type: "click", x: x, y: y}));
       };
     }
   </script>
