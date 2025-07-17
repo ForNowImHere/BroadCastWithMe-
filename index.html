@@ -81,7 +81,7 @@
 
   function connect() {
     // CHANGE THIS TO YOUR SERVER'S WS URL:
-    ws = new WebSocket("ws://YOUR_SERVER_IP:8765");
+    ws = new WebSocket("ws://c9c0e85af4a2.ngrok-free.app");
 
     ws.onopen = () => {
       statusEl.textContent = "Connected to server. Waiting for auth request...";
