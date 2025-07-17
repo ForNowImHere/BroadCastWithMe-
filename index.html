@@ -1,152 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Secure Window Broadcast Viewer</title>
-<style>
-  body {
-    background: #111;
-    color: #eee;
-    font-family: monospace, monospace;
-    margin: 0; padding: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100vh;
-  }
-  #status {
-    margin: 1em;
-    font-size: 1.2em;
-  }
-  #stream {
-    max-width: 90vw;
-    max-height: 80vh;
-    border: 2px solid #0f0;
-    cursor: crosshair;
-  }
-  #login {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5em;
-    margin-top: 3em;
-  }
-  input {
-    font-size: 1em;
-    padding: 0.4em;
-    background: #222;
-    border: 1px solid #555;
-    color: #eee;
-  }
-  button {
-    background: #0a0;
-    color: #eee;
-    font-weight: bold;
-    border: none;
-    padding: 0.5em;
-    cursor: pointer;
-  }
-  button:disabled {
-    background: #444;
-    cursor: not-allowed;
-  }
-</style>
+  <title>Secure Auth</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+    input, button { margin: 8px; padding: 10px; font-size: 16px; }
+  </style>
 </head>
 <body>
+  <h2>Login to Broadcast</h2>
+  <input id="user" placeholder="Username">
+  <input id="pass" placeholder="Password" type="password">
+  <input id="code" placeholder="One-time Code">
+  <button onclick="connect()">Login</button>
+  <p id="status"></p>
 
-<h1>Secure Window Broadcast Viewer</h1>
+  <script>
+    function connect() {
+      const ws = new WebSocket("wss://c9c0e85af4a2.ngrok-free.app");
+      const status = document.getElementById("status");
 
-<div id="status">Connecting...</div>
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          username: document.getElementById("user").value,
+          password: document.getElementById("pass").value,
+          code: document.getElementById("code").value
+        }));
+      };
 
-<div id="login">
-  <input type="text" id="username" placeholder="Username" autocomplete="off" />
-  <input type="password" id="password" placeholder="Password" autocomplete="off" />
-  <input type="text" id="accessCode" placeholder="Access Code" autocomplete="off" />
-  <button id="loginBtn">Login & Watch</button>
-</div>
-
-<img id="stream" src="" alt="Live Stream" style="display:none" />
-
-<script>
-(() => {
-  const statusEl = document.getElementById("status");
-  const loginDiv = document.getElementById("login");
-  const usernameInput = document.getElementById("username");
-  const passwordInput = document.getElementById("password");
-  const accessCodeInput = document.getElementById("accessCode");
-  const loginBtn = document.getElementById("loginBtn");
-  const streamImg = document.getElementById("stream");
-
-  let ws = null;
-
-  function connect() {
-    // CHANGE THIS TO YOUR SERVER'S WS URL:
-    ws = new WebSocket("ws://c9c0e85af4a2.ngrok-free.app");
-
-    ws.onopen = () => {
-      statusEl.textContent = "Connected to server. Waiting for auth request...";
-    };
-
-    ws.onmessage = (event) => {
-      try {
+      ws.onmessage = event => {
         const data = JSON.parse(event.data);
+        if (data.type === "request_auth") return; // ignore
+        status.textContent = data.message;
+        if (data.success) status.style.color = "lightgreen";
+        else status.style.color = "red";
+      };
 
-        if (data.type === "request_auth") {
-          statusEl.textContent = "Please login to access the stream.";
-          loginDiv.style.display = "flex";
-        }
-        else if (data.type === "auth_result") {
-          if (data.success) {
-            statusEl.textContent = "Authentication successful! Streaming started.";
-            loginDiv.style.display = "none";
-            streamImg.style.display = "block";
-          } else {
-            statusEl.textContent = "Access denied: " + data.message;
-            alert("Access denied: " + data.message);
-            ws.close();
-          }
-        }
-      } catch {
-        // If message is not JSON, treat as base64 stream frame:
-        streamImg.src = "data:image/jpeg;base64," + event.data;
-      }
-    };
-
-    ws.onerror = (err) => {
-      statusEl.textContent = "Connection error.";
-      console.error(err);
-    };
-
-    ws.onclose = () => {
-      statusEl.textContent = "Disconnected from server.";
-      loginDiv.style.display = "flex";
-      streamImg.style.display = "none";
-    };
-  }
-
-  loginBtn.onclick = () => {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    const code = accessCodeInput.value.trim();
-
-    if (!username || !password || !code) {
-      alert("Please fill all fields!");
-      return;
+      ws.onerror = () => {
+        status.textContent = "Connection error.";
+        status.style.color = "red";
+      };
     }
-
-    const authPayload = JSON.stringify({
-      username,
-      password,
-      code
-    });
-
-    ws.send(authPayload);
-    statusEl.textContent = "Authenticating...";
-  };
-
-  connect();
-})();
-</script>
-
+  </script>
 </body>
 </html>
