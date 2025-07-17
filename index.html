@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Window Viewer</title>
+</head>
+<body>
+  <h1>Live Window Broadcast</h1>
+  <img id="screen" style="max-width: 100%;">
+  <script>
+    const img = document.getElementById('screen');
+    const ws = new WebSocket("ws://YOUR_PUBLIC_IP_OR_SERVER:8765");
+    ws.onmessage = (event) => {
+        img.src = 'data:image/jpeg;base64,' + event.data;
+    };
+  </script>
+</body>
+</html>
