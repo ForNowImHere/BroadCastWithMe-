@@ -1,69 +1,72 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Secure WebSocket</title>
+  <meta charset="UTF-8" />
+  <title>Glitchly Connect</title>
+  <style>
+    body {
+      background-color: #111;
+      color: #0f0;
+      font-family: monospace;
+      text-align: center;
+      padding: 30px;
+    }
+    input, button {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+    }
+    canvas {
+      border: 2px solid #0f0;
+      margin-top: 20px;
+    }
+  </style>
 </head>
 <body>
-    <div id="auth">
-        <h2>Login</h2>
-        <input id="username" placeholder="Username"><br>
-        <input id="password" placeholder="Password"><br>
-        <input id="code" placeholder="Access Code"><br>
-        <button onclick="login()">Login</button>
-    </div>
+  <h1>🔒 Glitchly Remote Access</h1>
+  <div id="login">
+    <input id="user" placeholder="Username" /><br>
+    <input id="pass" type="password" placeholder="Password" /><br>
+    <input id="code" placeholder="Access Code" /><br>
+    <button onclick="connect()">Connect</button>
+  </div>
+  <canvas id="screen" width="800" height="450"></canvas>
 
-    <div id="main" style="display:none">
-        <h2>Welcome!</h2>
-        <button onclick="sendPing()">Send Ping</button>
-        <input id="echoInput" placeholder="Say something">
-        <button onclick="sendEcho()">Send Echo</button>
-        <pre id="log"></pre>
-    </div>
+  <script>
+    let ws;
+    let canvas = document.getElementById('screen');
+    let ctx = canvas.getContext('2d');
 
-    <script>
-        let ws;
+    function connect() {
+      const username = document.getElementById('user').value;
+      const password = document.getElementById('pass').value;
+      const code = document.getElementById('code').value;
 
-        function log(msg) {
-            document.getElementById('log').textContent += msg + "\n";
+      ws = new WebSocket('wss://your-ngrok-subdomain.ngrok-free.app/ws');
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', username, password, code }));
+      };
+
+      ws.onmessage = (msg) => {
+        let data = JSON.parse(msg.data);
+        if (data.type === 'frame') {
+          let img = new Image();
+          img.src = 'data:image/jpeg;base64,' + data.data;
+          img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        } else if (data.type === 'auth' && data.ok === true) {
+          document.getElementById('login').style.display = 'none';
+        } else if (data.type === 'auth') {
+          alert('Auth failed or locked out.');
         }
+      };
 
-        function login() {
-            ws = new WebSocket("wss://c9c0e85af4a2.ngrok-free.app");
-
-            ws.onopen = () => {
-                ws.send(JSON.stringify({
-                    username: document.getElementById("username").value,
-                    password: document.getElementById("password").value,
-                    code: document.getElementById("code").value
-                }));
-            };
-
-            ws.onmessage = (msg) => {
-                const data = JSON.parse(msg.data);
-                if (data.type === "auth_result") {
-                    log(data.message);
-                    if (data.success) {
-                        document.getElementById("auth").style.display = "none";
-                        document.getElementById("main").style.display = "block";
-                    }
-                } else if (data.type === "pong") {
-                    log("Received pong!");
-                } else if (data.type === "echo") {
-                    log("Echo: " + data.message);
-                } else {
-                    log("Other: " + msg.data);
-                }
-            };
-        }
-
-        function sendPing() {
-            ws.send(JSON.stringify({type: "ping"}));
-        }
-
-        function sendEcho() {
-            let msg = document.getElementById("echoInput").value;
-            ws.send(JSON.stringify({type: "echo", message: msg}));
-        }
-    </script>
+      canvas.onclick = (e) => {
+        const x = e.offsetX / canvas.width;
+        const y = e.offsetY / canvas.height;
+        ws.send(JSON.stringify({ type: 'click', x, y }));
+      };
+    }
+  </script>
 </body>
 </html>
