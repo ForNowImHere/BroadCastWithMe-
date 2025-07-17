@@ -5,127 +5,114 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Screen Share Control</title>
 <style>
-  body { font-family: Arial, sans-serif; background:#222; color:#eee; margin:0; padding:20px; }
-  #login { margin-bottom: 15px; }
-  label { display:block; margin: 8px 0 4px; }
-  input { padding: 6px; width: 200px; }
-  button { margin-top: 10px; padding: 8px 12px; }
-  #messages { margin-top: 10px; height: 100px; overflow-y: auto; background:#333; padding: 8px; border-radius: 5px; }
-  #screen { display:block; margin-top: 15px; max-width: 100%; border: 2px solid #555; cursor: crosshair; }
+  body { background: #111; color: #eee; font-family: monospace; }
+  #login { margin-bottom: 1rem; }
+  label, input { display: block; margin: 0.3rem 0; }
+  #log { height: 4rem; overflow-y: auto; background: #222; padding: 0.5rem; margin-bottom: 1rem; }
+  canvas { border: 1px solid #444; background: black; cursor: crosshair; }
 </style>
 </head>
 <body>
 
-<h1>Screen Share Control</h1>
+<h2>Screen Share Control</h2>
 
 <div id="login">
-  <label>Username:</label>
-  <input id="username" type="text" placeholder="Username" />
-  <label>Password:</label>
-  <input id="password" type="password" placeholder="Password" />
-  <label>Access Code:</label>
-  <input id="code" type="text" placeholder="Enter code" />
+  <label>Username:<input id="username" value="keenbean" /></label>
+  <label>Password:<input id="password" type="password" value="supersecret" /></label>
+  <label>Access Code:<input id="code" placeholder="Waiting for code..." readonly /></label>
   <button id="connectBtn">Connect</button>
 </div>
 
-<div id="messages"></div>
+<div id="log"></div>
 
-<img id="screen" alt="Shared screen will appear here" />
+<canvas id="screen" width="800" height="450"></canvas>
 
 <script>
-  const wsUrl = "ws://c9c0e85af4a2.ngrok-free.app:8765"; // Change to your server URL if needed
   let ws;
-  let controlAllowed = false;
-  const messages = document.getElementById("messages");
-  const screenImg = document.getElementById("screen");
+  const logDiv = document.getElementById("log");
+  const canvas = document.getElementById("screen");
+  const ctx = canvas.getContext("2d");
+  const usernameInput = document.getElementById("username");
+  const passwordInput = document.getElementById("password");
+  const codeInput = document.getElementById("code");
   const connectBtn = document.getElementById("connectBtn");
 
-  function logMessage(msg) {
-    messages.innerHTML += msg + "<br>";
-    messages.scrollTop = messages.scrollHeight;
+  function log(msg) {
+    logDiv.textContent += msg + "\n";
+    logDiv.scrollTop = logDiv.scrollHeight;
   }
 
-  function sendJSON(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(obj));
-    }
-  }
+  function connect() {
+    if (ws) ws.close();
 
-  connectBtn.onclick = () => {
-    const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value.trim();
-    const code = document.getElementById("code").value.trim();
-    if (!username || !password || !code) {
-      alert("Please fill in all fields.");
-      return;
-    }
+    // Replace this with your actual ngrok URL + port (use wss:// for secure)
+    // Example: 'wss://8205375fe07a.ngrok-free.app'
+    const ngrokUrl = "wss://8205375fe07a.ngrok-free.app"; 
 
-    ws = new WebSocket(wsUrl);
+    ws = new WebSocket(ngrokUrl);
 
     ws.onopen = () => {
-      logMessage("WebSocket connected, requesting auth...");
-      sendJSON({ username, password, code });
+      log("WebSocket connected.");
     };
 
     ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      let msg = JSON.parse(event.data);
 
-        if (data.type === "request_auth") {
-          logMessage("Server requests authentication...");
-          // Send auth info
-          sendJSON({ username, password, code });
-
-        } else if (data.type === "auth_code_generated") {
-          logMessage("Access code generated: " + data.code);
-
-        } else if (data.type === "auth_result") {
-          if (data.success) {
-            logMessage("Auth success: " + data.message);
-            controlAllowed = data.control_allowed || false;
-          } else {
-            logMessage("Auth failed: " + data.message);
-            controlAllowed = false;
-          }
-
-        } else if (data.type === "screenshot") {
-          screenImg.src = "data:image/jpeg;base64," + data.data;
-
-        } else if (data.type === "control_denied") {
-          logMessage("Control denied: " + data.reason);
-
-        } else if (data.type === "control_timeout") {
-          logMessage("Control timeout: " + data.message);
-          controlAllowed = false;
+      if (msg.type === "auth_code_generated") {
+        codeInput.value = msg.code;
+        log("New access code received: " + msg.code);
+      } 
+      else if (msg.type === "request_auth") {
+        // Send auth details
+        ws.send(JSON.stringify({
+          username: usernameInput.value,
+          password: passwordInput.value,
+          code: codeInput.value
+        }));
+        log("Sent auth data.");
+      }
+      else if (msg.type === "auth_result") {
+        if (msg.success) {
+          log("Authentication successful! Welcome!");
+        } else {
+          log("Auth failed: " + msg.message);
         }
-
-      } catch (e) {
-        // Not JSON, maybe raw image data? Ignore.
+      }
+      else if (msg.type === "screenshot") {
+        const img = new Image();
+        img.src = "data:image/jpeg;base64," + msg.data;
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+      }
+      else if(msg.type === "control_timeout") {
+        log("Control expired.");
       }
     };
 
-    ws.onclose = () => {
-      logMessage("WebSocket connection closed.");
-      controlAllowed = false;
-    };
-
     ws.onerror = (e) => {
-      logMessage("WebSocket error: " + e.message);
+      log("WebSocket error: " + e.message);
     };
-  };
 
-  // Send mouse control commands if allowed
-  screenImg.addEventListener("mousemove", (e) => {
-    if (!controlAllowed) return;
-    const rect = screenImg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * window.screen.width;
-    const y = ((e.clientY - rect.top) / rect.height) * window.screen.height;
-    sendJSON({ type: "mouse_move", x: Math.floor(x), y: Math.floor(y) });
+    ws.onclose = () => {
+      log("WebSocket closed.");
+    };
+  }
+
+  connectBtn.onclick = connect;
+
+  // Send mouse move and click commands
+  canvas.addEventListener("mousemove", (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) * (1920 / canvas.width)); // Assuming 1920x1080 screen - adjust as needed
+    const y = Math.floor((e.clientY - rect.top) * (1080 / canvas.height));
+    ws.send(JSON.stringify({ type: "mouse_move", x, y }));
   });
 
-  screenImg.addEventListener("click", () => {
-    if (!controlAllowed) return;
-    sendJSON({ type: "click" });
+  canvas.addEventListener("click", (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "click" }));
   });
 </script>
 
